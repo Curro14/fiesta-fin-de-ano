@@ -53,3 +53,10 @@ Alternativas: Render (con disco de pago) o Fly.io (con volumen). La web tiene qu
 - Ten el brillo del móvil alto y pide a los invitados que suban el brillo al enseñar el QR.
 - Varias personas pueden controlar la puerta a la vez con la misma contraseña.
 - Exporta el CSV de vez en cuando como copia de seguridad.
+
+## Despliegue automático (GitHub → Cloudflare)
+
+El código está en el repositorio privado de GitHub `Curro14/fiesta-fin-de-ano`, conectado al Worker `fiesta-fin-de-ano` de Cloudflare.
+Cada cambio que se sube a la rama `main` se publica solo en la web, en uno o dos minutos (`npx wrangler deploy`).
+Se puede seguir cada despliegue en Cloudflare → Workers & Pages → fiesta-fin-de-ano → Deployments.
+La contraseña del panel (`ADMIN_PASSWORD`) y `SESSION_SECRET` están guardadas como secretos en Cloudflare y no cambian al desplegar.
