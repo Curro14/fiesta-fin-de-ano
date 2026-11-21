@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Control de puerta</title>
+  <meta name="theme-color" content="#161c1a">
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link rel="preconnect" href="https://cdn.fontshare.com" crossorigin>
+  <link href="https://api.fontshare.com/v2/css?f[]=erode@400,500,600,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/estilos.css">
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+  <main class="app" style="max-width:640px">
+    <section id="login" class="acceso oculto">
+      <h1>Control de puerta</h1>
+      <form id="formLogin">
+        <div id="errLogin" class="error oculto"></div>
+        <label for="pw">Contraseña de organización</label><input id="pw" type="password" autocomplete="current-password">
+        <button class="btn">Entrar</button>
+      </form>
+    </section>
+
+    <section id="panel" class="oculto">
+      <div class="app-barra">
+        <h1>Puerta</h1>
+        <a class="btn suave mini" href="/admin">Panel</a>
+      </div>
+      <div class="cifras-app" style="grid-template-columns:1fr 1fr">
+        <div class="cifra destacada"><div class="n" id="dentro">–</div><div class="l">Han entrado</div></div>
+        <div class="cifra"><div class="n" id="faltan">–</div><div class="l">Faltan por llegar</div></div>
+      </div>
+
+      <div id="lector"></div>
+      <div style="text-align:center;margin:14px 0 24px">
+        <button class="btn" id="arrancar" style="width:100%;max-width:520px">Abrir la cámara y escanear</button>
+        <p id="errCam" class="muted oculto" style="margin-top:12px"></p>
+      </div>
+
+      <form id="manual" class="panel">
+        <label for="codigo" style="display:block;font-weight:600;margin-bottom:10px">Si el QR no se lee, escribe el código</label>
+        <div style="display:flex;gap:8px">
+          <input id="codigo" type="text" placeholder="FA-XXXX" autocapitalize="characters" autocomplete="off">
+          <button class="btn" style="flex:none">Validar</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <div class="resultado" id="resultado" role="alert">
+    <div class="titulo" id="rTitulo"></div>
+    <div class="nombre" id="rNombre"></div>
+    <div class="detalle" id="rDetalle"></div>
+    <div class="botones">
+      <button class="btn papel" id="rSeguir">Siguiente</button>
+      <button class="btn suave oculto" id="rDeshacer">Deshacer entrada</button>
+    </div>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+let lector, ocupado = false, ultimo = { v: '', t: 0 }, ultimoId = null;
+
+async function post(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (r.status === 401) { mostrarLogin(); throw new Error('401'); }
+  return r.json();
+}
+function mostrarLogin() { $('#login').classList.remove('oculto'); $('#panel').classList.add('oculto'); }
+
+$('#formLogin').addEventListener('submit', async e => {
+  e.preventDefault();
+  const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('#pw').value }) });
+  if (!r.ok) { $('#errLogin').textContent = 'Contraseña incorrecta'; $('#errLogin').classList.remove('oculto'); return; }
+  iniciar();
+});
+
+async function contadores() {
+  const r = await fetch('/api/admin/resumen');
+  if (!r.ok) return;
+  const t = (await r.json()).totales;
+  $('#dentro').textContent = t.dentro;
+  $('#faltan').textContent = Math.max(0, t.pagados - t.dentro);
+}
+
+const ESTILOS = {
+  ok:        { icono: '', titulo: 'Adelante', vibrar: [80] },
+  usada:     { icono: '', titulo: 'Ya usada', vibrar: [200, 100, 200] },
+  pendiente: { icono: '', titulo: 'Sin pagar', vibrar: [200, 100, 200] },
+  invalida:  { icono: '', titulo: 'No vale', vibrar: [400] },
+};
+let temporizador;
+
+async function validar(valor) {
+  if (ocupado || !valor) return;
+  const ahora = Date.now();
+  if (valor === ultimo.v && ahora - ultimo.t < 4000) return; // evita leer el mismo QR dos veces seguidas
+  ultimo = { v: valor, t: ahora };
+  ocupado = true;
+  try {
+    const r = await post('/api/puerta/validar', { valor });
+    const e = ESTILOS[r.resultado];
+    ultimoId = r.resultado === 'ok' ? r.id : null;
+    $('#resultado').className = 'resultado visible ' + r.resultado;
+        $('#rTitulo').textContent = e.titulo;
+    $('#rNombre').textContent = r.nombre || '';
+    $('#rDetalle').textContent = r.resultado === 'usada'
+      ? `${r.mensaje} a las ${new Date(r.checkinEn).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })} · ${r.codigo}`
+      : [r.mensaje, r.codigo].filter(Boolean).join(' · ');
+    $('#rDeshacer').classList.toggle('oculto', r.resultado !== 'ok');
+    navigator.vibrate?.(e.vibrar);
+    clearTimeout(temporizador);
+    if (r.resultado === 'ok') temporizador = setTimeout(cerrar, 2500);
+    contadores();
+  } catch { ocupado = false; }
+}
+function cerrar() { clearTimeout(temporizador); $('#resultado').className = 'resultado'; ocupado = false; }
+$('#rSeguir').addEventListener('click', cerrar);
+$('#rDeshacer').addEventListener('click', async () => {
+  if (ultimoId) await post('/api/puerta/deshacer', { id: ultimoId });
+  ultimo = { v: '', t: 0 };
+  cerrar(); contadores();
+});
+
+$('#manual').addEventListener('submit', e => {
+  e.preventDefault();
+  const v = $('#codigo').value.trim();
+  ultimo = { v: '', t: 0 };
+  validar(v);
+  $('#codigo').value = '';
+});
+
+$('#arrancar').addEventListener('click', async () => {
+  $('#errCam').classList.add('oculto');
+  try {
+    lector = lector || new Html5Qrcode('lector');
+    await lector.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 240, height: 240 } }, txt => validar(txt));
+    $('#arrancar').classList.add('oculto');
+  } catch (err) {
+    $('#errCam').textContent = 'No se pudo abrir la cámara. Da permiso a la cámara en el navegador (la web tiene que abrirse con https://). Mientras tanto puedes escribir el código.';
+    $('#errCam').classList.remove('oculto');
+  }
+});
+
+async function iniciar() {
+  const s = await fetch('/api/sesion').then(r => r.json());
+  if (!s.admin) return mostrarLogin();
+  $('#login').classList.add('oculto');
+  $('#panel').classList.remove('oculto');
+  contadores();
+  setInterval(contadores, 15000);
+}
+iniciar();
+</script>
+</body>
+</html>

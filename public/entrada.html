@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mi entrada · Fin de Año</title>
+  <meta name="theme-color" content="#161c1a">
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link rel="preconnect" href="https://cdn.fontshare.com" crossorigin>
+  <link href="https://api.fontshare.com/v2/css?f[]=erode@400,500,600,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/estilos.css">
+</head>
+<body>
+  <main class="pagina-entrada" id="app">
+    <img class="noche" src="/assets/beautiful-fireworks-night-sky.webp" alt="" width="1024" height="762">
+    <p class="muted">Cargando tu entrada…</p>
+  </main>
+
+<script>
+const $ = s => document.querySelector(s);
+const token = location.pathname.split('/').pop();
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const nueva = new URLSearchParams(location.search).has('nueva');
+const fondo = '<img class="noche" src="/assets/beautiful-fireworks-night-sky.webp" alt="" width="1024" height="762">';
+const hora = iso => new Date(iso).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+
+function copiar(texto, btn) {
+  navigator.clipboard?.writeText(texto).then(() => {
+    const t = btn.textContent; btn.textContent = 'Copiado'; setTimeout(() => btn.textContent = t, 1500);
+  });
+}
+function unir(arr) { return arr.length < 2 ? arr.join('') : arr.slice(0, -1).join(', ') + ' y ' + arr.at(-1); }
+function copa(d, ev) {
+  const n = (l, id) => (l.find(x => x.id === id) || {}).nombre || id;
+  const b = unir(d.bebidas.map(id => n(ev.bebidas, id)));
+  const r = unir(d.refrescos.map(id => n(ev.refrescos, id)));
+  return esc(b + (r ? ' con ' + r : ''));
+}
+
+async function cargar() {
+  const [r, ev] = await Promise.all([fetch('/api/entrada/' + token), fetch('/api/evento').then(r => r.json())]);
+  if (!r.ok) {
+    $('#app').innerHTML = fondo + `<div class="pendiente-wrap"><div class="texto"><h1>No encontramos esta entrada</h1><p>Revisa que el enlace esté completo o vuelve a la hoja de inscripción.</p><p><a class="btn" href="/">Ir a la inscripción</a></p></div></div>`;
+    return;
+  }
+  const d = await r.json();
+  document.title = `${d.nombre} · Fin de Año`;
+  const e = ev.evento, p = ev.pago;
+  let html = fondo;
+
+  if (d.admin) html += `<p class="aviso-org">Estás como organizador. <a href="/puerta">Abrir el control de puerta</a></p>`;
+
+  if (d.estado === 'pagado') {
+    html += `
+      <article class="boleto">
+        <div class="izq">
+          <h1>Fin de Año 2026</h1>
+          <p class="hechos">${esc(e.fecha)}<br>${esc(e.horario || '')}<br>${esc(e.lugar)}${e.direccion ? ', ' + esc(e.direccion) : ''}</p>
+          <div>
+            <p class="quien">${esc(d.nombre)}</p>
+            <p class="copa">${copa(d, ev)}</p>
+          </div>
+        </div>
+        <div class="der">
+          <div class="qr" role="img" aria-label="Código QR de tu entrada">${d.qr}</div>
+          <p class="codigo">${esc(d.codigo)}</p>
+          ${d.checkinEn ? `<p class="usada">Entró a las ${hora(d.checkinEn)}</p>` : ''}
+        </div>
+      </article>
+      <div class="bajo-boleto">
+        <p>Enséñalo en la puerta de ${esc(e.lugar)}, de 1:30 a 2:00, con el brillo alto. Es personal y vale para una sola entrada. Haz una captura por si te quedas sin cobertura.</p>
+        <div class="acciones">
+          <button class="btn papel mini" id="descargar">Guardar como imagen</button>
+          <button class="btn suave mini" id="copiar">Copiar mi enlace</button>
+        </div>
+      </div>`;
+  } else if (d.estado === 'cancelado') {
+    html += `<div class="pendiente-wrap"><div class="texto"><h1>Inscripción cancelada</h1><p>Esta entrada ya no vale. Si crees que es un error, escribe a la organización.</p></div></div>`;
+  } else {
+    const concepto = `${d.codigo} ${d.nombre}`;
+    html += `
+      ${nueva ? `<p class="recien">Ya estás en la lista, ${esc(d.nombre.split(' ')[0])}. Guarda este enlace: aquí aparecerá tu entrada.</p>` : ''}
+      <div class="pendiente-wrap">
+        <div class="texto">
+          <h1>Falta tu Bizum</h1>
+          <p class="estado">Pendiente de pago</p>
+          <p>En cuanto veamos los ${p.precio} € con tu concepto, esta misma página se convierte en tu entrada con QR. No hace falta recargar.</p>
+          <p>Tu pedido: ${copa(d, ev)}${d.comentarios ? `. “${esc(d.comentarios)}”` : ''}</p>
+          <div class="mi-enlace">
+            <p class="muted">Tu enlace personal</p>
+            <div class="copiable"><span>${esc(d.enlace)}</span><button class="btn mini" id="copiar">Copiar</button></div>
+          </div>
+        </div>
+        <div class="recibo">
+          <h3>Bizum a cualquiera de estos</h3>
+          ${(p.organizadores || []).map(o => `<div class="copiable"><span style="flex:none;width:5.5em">${esc(o.nombre)}</span><code style="flex:1">${esc(o.bizum)}</code><button class="btn tinta mini" data-copiar="${esc(o.bizum.replace(/\s/g, ''))}">Copiar</button></div>`).join('')}
+          <h3>Con este concepto</h3>
+          <div class="copiable"><code>${esc(concepto)}</code><button class="btn tinta mini" data-copiar="${esc(concepto)}">Copiar</button></div>
+          <h3>¿Venís en grupo?</h3>
+          <p style="color:var(--paper-muted);margin-top:8px">Juntad el dinero y mandad un solo Bizum (${p.precio} € por persona) a uno de los organizadores. Poned en el concepto los códigos o nombres de todos, o escribid por WhatsApp a ese mismo número diciendo de quiénes es.</p>
+          ${p.iban ? `<h3>O por transferencia</h3><div class="copiable"><code>${esc(p.iban)}</code><button class="btn tinta mini" data-copiar="${esc(p.iban.replace(/\s/g, ''))}">Copiar</button></div>` : ''}
+          <h3>Y el día de la fiesta</h3>
+          <div class="linea"><span class="q">Enseñas el QR</span><span class="puntos"></span><span class="v">1:30–2:00</span></div>
+          <div class="total"><span>Entrada con barra libre</span><span>${p.precio} €</span></div>
+        </div>
+      </div>`;
+    setTimeout(cargar, 30000);
+  }
+
+  $('#app').innerHTML = html;
+  $('#copiar')?.addEventListener('click', ev => copiar(d.enlace, ev.target));
+  document.querySelectorAll('[data-copiar]').forEach(b => b.addEventListener('click', () => copiar(b.dataset.copiar, b)));
+  $('#descargar')?.addEventListener('click', () => descargarQR(d));
+}
+
+function descargarQR(d) {
+  const svg = new Blob([document.querySelector('.qr svg').outerHTML], { type: 'image/svg+xml' });
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas');
+    c.width = 800; c.height = 1000;
+    const x = c.getContext('2d');
+    x.fillStyle = '#e3e2da'; x.fillRect(0, 0, c.width, c.height);
+    x.fillStyle = '#fff'; x.fillRect(60, 60, 680, 680);
+    x.drawImage(img, 80, 80, 640, 640);
+    x.fillStyle = '#161c1a'; x.textAlign = 'center';
+    x.font = '600 52px Erode, Georgia, serif'; x.fillText(d.codigo, 400, 830);
+    x.font = '36px Erode, Georgia, serif'; x.fillText(d.nombre, 400, 890);
+    x.font = '28px Erode, Georgia, serif'; x.fillText('Fin de Año 2026', 400, 945);
+    const a = document.createElement('a');
+    a.href = c.toDataURL('image/png'); a.download = `entrada-${d.codigo}.png`; a.click();
+  };
+  img.src = URL.createObjectURL(svg);
+}
+
+cargar();
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "fiesta-fin-de-ano",
+  "version": "1.0.0",
+  "description": "Inscripción, bebidas, pagos por Bizum y entradas QR para la fiesta de fin de año",
+  "main": "src/worker.js",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy",
+    "db:local": "wrangler d1 migrations apply fiesta-fin-de-ano --local",
+    "db:remote": "wrangler d1 migrations apply fiesta-fin-de-ano --remote"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "wrangler": "^4.165.0"
+  }
+}

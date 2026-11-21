@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Organización · Fin de Año</title>
+  <meta name="theme-color" content="#161c1a">
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link rel="preconnect" href="https://cdn.fontshare.com" crossorigin>
+  <link href="https://api.fontshare.com/v2/css?f[]=erode@400,500,600,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/estilos.css">
+</head>
+<body>
+  <main class="app">
+    <section id="login" class="acceso oculto">
+      <h1>Panel de organización</h1>
+      <form id="formLogin">
+        <div id="errLogin" class="error oculto"></div>
+        <label for="pw">Contraseña</label><input id="pw" type="password" autocomplete="current-password">
+        <button class="btn">Entrar</button>
+      </form>
+    </section>
+
+    <section id="panel" class="oculto">
+      <div class="app-barra">
+        <h1>Organización</h1>
+        <div class="acciones">
+          <a class="btn mini" href="/puerta">Control de puerta</a>
+          <a class="btn suave mini" href="/api/admin/export.csv">Exportar a Excel</a>
+          <a class="btn suave mini" href="/" target="_blank">Ver la web</a>
+          <button class="btn suave mini" id="salir">Salir</button>
+        </div>
+      </div>
+
+      <div class="cifras-app" id="stats"></div>
+
+      <div class="pestanas" role="tablist">
+        <button data-tab="invitados" class="activo">Invitados</button>
+        <button data-tab="compra">Lista de la compra</button>
+      </div>
+
+      <div id="tab-invitados" class="panel">
+        <div class="filtros">
+          <input id="buscar" type="text" placeholder="Buscar por nombre, teléfono o código…" style="max-width:360px" aria-label="Buscar invitado">
+          <div class="segmentos" id="filtro">
+            <label><input type="radio" name="f" value="" checked>Todos</label>
+            <label><input type="radio" name="f" value="pendiente">Pendientes</label>
+            <label><input type="radio" name="f" value="pagado">Pagados</label>
+            <label><input type="radio" name="f" value="cancelado">Cancelados</label>
+          </div>
+        </div>
+        <div class="scroll-x">
+          <table class="tabla">
+            <thead><tr><th>Invitado</th><th>Bebida</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody id="filas"></tbody>
+          </table>
+        </div>
+        <p id="vacio" class="vacio oculto">Todavía no hay nadie con este filtro.</p>
+      </div>
+
+      <div id="tab-compra" class="panel oculto">
+        <div class="filtros">
+          <h2>Lista de la compra</h2>
+          <div class="segmentos">
+            <label><input type="radio" name="base" value="0" checked>Solo pagados</label>
+            <label><input type="radio" name="base" value="1">Incluir pendientes</label>
+          </div>
+        </div>
+        <div id="compra"></div>
+        <p class="muted" style="margin-top:20px;max-width:70ch">Ron, ginebra, whisky y vodka: una botella por cada 3 personas que lo han elegido, redondeando hacia arriba. Las botellas concretas que piden están en los comentarios de la pestaña Invitados. El hielo lo pone el local.</p>
+      </div>
+    </section>
+  </main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let evento, lista = [];
+
+async function api(url, opts = {}) {
+  const r = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  if (r.status === 401) { mostrarLogin(); throw new Error('401'); }
+  return r.json();
+}
+function mostrarLogin() { $('#login').classList.remove('oculto'); $('#panel').classList.add('oculto'); }
+
+$('#formLogin').addEventListener('submit', async e => {
+  e.preventDefault();
+  const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('#pw').value }) });
+  if (!r.ok) { $('#errLogin').textContent = 'Contraseña incorrecta'; $('#errLogin').classList.remove('oculto'); return; }
+  iniciar();
+});
+$('#salir').addEventListener('click', async () => { await fetch('/api/logout', { method: 'POST' }); location.reload(); });
+
+document.querySelectorAll('.pestanas button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.pestanas button').forEach(x => x.classList.toggle('activo', x === b));
+  $('#tab-invitados').classList.toggle('oculto', b.dataset.tab !== 'invitados');
+  $('#tab-compra').classList.toggle('oculto', b.dataset.tab !== 'compra');
+}));
+$('#buscar').addEventListener('input', pintarFilas);
+document.querySelectorAll('input[name=f]').forEach(i => i.addEventListener('change', pintarFilas));
+document.querySelectorAll('input[name=base]').forEach(i => i.addEventListener('change', cargarResumen));
+
+const nombreDe = (l, id) => (l.find(x => x.id === id) || {}).nombre || id;
+
+function whatsapp(i) {
+  const tel = i.telefono.replace(/\D/g, '');
+  const num = tel.length === 9 ? '34' + tel : tel;
+  const txt = i.estado === 'pagado'
+    ? `¡Hola ${i.nombre.split(' ')[0]}! Pago recibido. Aquí tienes tu entrada para ${evento.evento.nombre}: ${i.enlace}`
+    : `¡Hola ${i.nombre.split(' ')[0]}! Te recuerdo el Bizum de ${evento.pago.precio} € para ${evento.evento.nombre}, con el concepto "${i.codigo}". Puedes mandarlo a cualquiera de los organizadores: ${(evento.pago.organizadores || []).map(o => `${o.nombre} ${o.bizum}`).join(', ')}. Si venís en grupo, haced un solo Bizum y decidnos de quiénes es. Tu enlace: ${i.enlace}`;
+  return `https://wa.me/${num}?text=${encodeURIComponent(txt)}`;
+}
+
+function pintarFilas() {
+  const q = $('#buscar').value.toLowerCase().trim();
+  const f = document.querySelector('input[name=f]:checked').value;
+  const filtradas = lista
+    .filter(i => !f || i.estado === f)
+    .filter(i => !q || [i.nombre, i.telefono, i.codigo].join(' ').toLowerCase().includes(q))
+    .sort((a, b) => b.creado.localeCompare(a.creado));
+  $('#vacio').classList.toggle('oculto', filtradas.length > 0);
+  $('#filas').innerHTML = filtradas.map(i => `
+    <tr>
+      <td><b>${esc(i.nombre)}</b><div class="sub">${esc(i.codigo)} · ${esc(i.telefono)}${i.email ? ' · ' + esc(i.email) : ''}</div>
+        ${i.comentarios ? `<div class="sub" style="margin-top:4px;color:var(--ink)">“${esc(i.comentarios)}”</div>` : ''}</td>
+      <td>${esc(i.bebidas.map(id => nombreDe(evento.bebidas, id)).join(', '))}
+        ${i.refrescos.length ? `<div class="sub">con ${esc(i.refrescos.map(id => nombreDe(evento.refrescos, id)).join(', '))}</div>` : ''}</td>
+      <td><span class="etiqueta ${i.estado}">${{pendiente:"Pendiente",pagado:"Pagado",cancelado:"Cancelado"}[i.estado]}</span>
+        ${i.checkinEn ? `<div style="margin-top:4px"><span class="etiqueta dentro">Dentro ${new Date(i.checkinEn).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}</td>
+      <td><div class="acciones">
+        ${i.estado !== 'pagado' ? `<button class="btn mini" data-accion="pagado" data-id="${i.id}">Marcar pagado</button>` : `<button class="btn suave mini" data-accion="pendiente" data-id="${i.id}">Deshacer pago</button>`}
+        <a class="btn suave mini" href="${whatsapp(i)}" target="_blank" rel="noopener">WhatsApp</a>
+        <a class="btn suave mini" href="${i.enlace}" target="_blank">Ver entrada</a>
+        ${i.estado !== 'cancelado' ? `<button class="btn peligro mini" data-accion="cancelado" data-id="${i.id}">Cancelar</button>` : `<button class="btn peligro mini" data-accion="borrar" data-id="${i.id}">Eliminar</button>`}
+      </div></td>
+    </tr>`).join('');
+}
+
+$('#filas').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-accion]');
+  if (!b) return;
+  const i = lista.find(x => x.id === b.dataset.id);
+  const a = b.dataset.accion;
+  if (a === 'cancelado' && !confirm(`¿Cancelar la inscripción de ${i.nombre}? Su entrada dejará de valer.`)) return;
+  if (a === 'borrar' && !confirm(`¿Eliminar definitivamente a ${i.nombre}? No se puede deshacer.`)) return;
+  b.disabled = true;
+  if (a === 'borrar') await api('/api/admin/inscripciones/' + i.id, { method: 'DELETE' });
+  else await api('/api/admin/inscripciones/' + i.id, { method: 'PATCH', body: JSON.stringify({ estado: a }) });
+  if (a === 'pagado' && confirm(`Pago de ${i.nombre} confirmado. ¿Le mandas su entrada por WhatsApp?`)) {
+    window.open(whatsapp({ ...i, estado: 'pagado' }), '_blank');
+  }
+  cargar();
+});
+
+async function cargarResumen() {
+  const todos = document.querySelector('input[name=base]:checked').value;
+  const r = await api('/api/admin/resumen?todos=' + todos);
+  const t = r.totales;
+  $('#stats').innerHTML = [
+    [t.recaudado + ' €', 'Recaudado', 1], [t.porCobrar + ' €', 'Por cobrar'], [t.inscritos, 'Inscritos'],
+    [t.pagados, 'Pagados'], [t.pendientes, 'Sin pagar'], [t.dentro, 'Ya en la fiesta'],
+  ].map(([n, l, d]) => `<div class="cifra${d ? ' destacada' : ''}"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+
+  const filasB = r.bebidas.filter(b => b.personas).map(b =>
+    `<tr><td><b>${esc(b.nombre)}</b></td><td class="num">${b.personas}</td><td class="num">${b.copas}</td><td class="num"><b>${b.unidades}</b> <span class="sub">× ${esc(b.unidad)}${b.personasPorBotella ? ` · 1 cada ${b.personasPorBotella} personas` : ''}</span></td></tr>`).join('');
+  const filasR = r.refrescos.filter(b => b.personas).map(b =>
+    `<tr><td><b>${esc(b.nombre)}</b></td><td class="num">${b.personas}</td><td class="num">${b.copas}</td><td class="num"><b>${b.latas}</b> <span class="sub">latas, o ${b.botellas2L} de 2 L</span></td></tr>`).join('');
+  $('#compra').innerHTML = r.personas === 0
+    ? '<p class="muted">Aún no hay invitados con este filtro.</p>'
+    : `<p class="muted" style="margin:8px 0 12px">Calculado para <b style="color:var(--ink)">${r.personas}</b> persona${r.personas > 1 ? 's' : ''}.</p>
+      <div class="scroll-x"><table class="tabla">
+        <thead><tr><th>Bebida</th><th class="num">Personas</th><th class="num">Copas</th><th class="num">Comprar</th></tr></thead>
+        <tbody>${filasB}</tbody></table></div>
+      ${filasR ? `<h2 style="margin-top:36px">Refrescos para mezclar</h2><div class="scroll-x"><table class="tabla">
+        <thead><tr><th>Refresco</th><th class="num">Personas</th><th class="num">Copas</th><th class="num">Comprar</th></tr></thead>
+        <tbody>${filasR}</tbody></table></div>` : ''}
+      <h2 style="margin-top:36px">Y además</h2>
+      <table class="tabla"><tbody>
+        <tr><td>Vasos</td><td class="num"><b>${r.personas * 3}</b> <span class="sub">3 por persona</span></td></tr>
+      </tbody></table>`;
+}
+
+async function cargar() {
+  lista = await api('/api/admin/inscripciones');
+  pintarFilas();
+  cargarResumen();
+}
+
+async function iniciar() {
+  evento = await fetch('/api/evento').then(r => r.json());
+  const s = await fetch('/api/sesion').then(r => r.json());
+  if (!s.admin) return mostrarLogin();
+  $('#login').classList.add('oculto');
+  $('#panel').classList.remove('oculto');
+  cargar();
+}
+iniciar();
+</script>
+</body>
+</html>
